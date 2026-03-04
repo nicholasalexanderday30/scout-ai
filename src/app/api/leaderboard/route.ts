@@ -9,6 +9,11 @@ const supabaseAdmin = createClient(
 const FASTAPI_SCORE_URL =
   process.env.FASTAPI_SCORE_URL || "http://127.0.0.1:8000/score";
 
+const FASTAPI_ENABLED =
+  !!process.env.FASTAPI_SCORE_URL &&
+  !process.env.FASTAPI_SCORE_URL.includes("127.0.0.1") &&
+  !process.env.FASTAPI_SCORE_URL.includes("localhost");
+
 // Calibration anchors
 const FBS_BASE_RATE_EQ6 = 0.065;
 const EQ6_P95 = 0.26;
@@ -23,7 +28,6 @@ type LeaderboardRow = {
   p_eq6: number | null;
   expected_college_level: number | null;
 
-  // Added context
   percentile: number | null; // 0..1 (higher is better)
   above_base_rate: boolean;
   is_95th: boolean;
@@ -57,11 +61,18 @@ async function scorePortalRow(row: any) {
 
 export async function GET() {
   // ---------- HISTORICAL ----------
-  const { data: historical } = await supabaseAdmin
+  const { data: historical, error: histErr } = await supabaseAdmin
     .from("historical_cb_2022")
     .select(
       "player_key, display_name, position, season, p_eq6, expected_college_level"
     );
+
+  if (histErr) {
+    return NextResponse.json(
+      { error: `historical_cb_2022 query failed: ${histErr.message}` },
+      { status: 500 }
+    );
+  }
 
   const historicalRows: LeaderboardRow[] = (historical ?? []).map((r: any) => {
     const eq6 = r.p_eq6 ?? null;
@@ -83,7 +94,7 @@ export async function GET() {
   });
 
   // ---------- PORTAL ----------
-  const { data: portal } = await supabaseAdmin
+  const { data: portal, error: portalErr } = await supabaseAdmin
     .from("player_profiles")
     .select(
       `
@@ -99,10 +110,24 @@ export async function GET() {
     `
     );
 
+  if (portalErr) {
+    return NextResponse.json(
+      { error: `player_profiles query failed: ${portalErr.message}` },
+      { status: 500 }
+    );
+  }
+
   const portalRows: LeaderboardRow[] = [];
 
   for (const r of portal ?? []) {
-    const scored = await scorePortalRow(r);
+    // In production without a deployed FastAPI, we cannot score portal players.
+    // Keep them on the leaderboard, but with null scores.
+    let scored = { p_eq6: null as number | null, expected_college_level: null as number | null };
+
+    if (FASTAPI_ENABLED) {
+      scored = await scorePortalRow(r);
+    }
+
     const eq6 = scored.p_eq6 ?? null;
 
     portalRows.push({
@@ -121,7 +146,7 @@ export async function GET() {
     });
   }
 
-  // Merge + sort
+  // Sort with nulls at bottom
   const merged = [...portalRows, ...historicalRows].sort((a, b) => {
     const av = a.p_eq6 ?? -1;
     const bv = b.p_eq6 ?? -1;
@@ -142,5 +167,6 @@ export async function GET() {
   return NextResponse.json({
     count: merged.length,
     rows: merged,
+    fastapi_enabled: FASTAPI_ENABLED,
   });
 }
