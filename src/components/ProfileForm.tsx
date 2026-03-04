@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { PlayerProfile, CompetitionLevel, SeasonGradeLevel } from "@/lib/types";
-import { loadPlayerProfile, upsertPlayerProfile } from "@/lib/profile";
+import { fetchPlayerProfile, upsertPlayerProfile } from "@/lib/profile";
 
 type Props = {
   userId: string;
@@ -53,7 +53,7 @@ export default function ProfileForm({ userId, onSignOut }: Props) {
       setStatus("");
       setScore(null);
 
-      const { data, error } = await loadPlayerProfile(userId);
+      const { data, error } = await fetchPlayerProfile(userId);
       if (error) {
         setStatus(`Load error: ${error}`);
         setLoading(false);
