@@ -8,7 +8,7 @@ export async function fetchPlayerProfile(userId: string): Promise<{
   const { data, error } = await supabase
     .from("player_profiles")
     .select("*")
-    .eq("id", userId)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (error) return { data: null, error: error.message };
@@ -22,7 +22,7 @@ export async function upsertPlayerProfile(profile: PlayerProfile): Promise<{
 }> {
   const { data, error } = await supabase
     .from("player_profiles")
-    .upsert(profile, { onConflict: "id" })
+    .upsert(profile, { onConflict: "user_id" })
     .select("*")
     .single();
 
