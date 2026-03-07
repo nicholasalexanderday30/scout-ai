@@ -6,14 +6,6 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const FASTAPI_SCORE_URL =
-  process.env.FASTAPI_SCORE_URL || "http://127.0.0.1:8000/score";
-
-const FASTAPI_ENABLED =
-  !!process.env.FASTAPI_SCORE_URL &&
-  !process.env.FASTAPI_SCORE_URL.includes("127.0.0.1") &&
-  !process.env.FASTAPI_SCORE_URL.includes("localhost");
-
 // Calibration anchors
 const FBS_BASE_RATE_EQ6 = 0.065;
 const EQ6_P95 = 0.26;
@@ -28,36 +20,11 @@ type LeaderboardRow = {
   p_eq6: number | null;
   expected_college_level: number | null;
 
-  percentile: number | null; // 0..1 (higher is better)
+  percentile: number | null;
   above_base_rate: boolean;
   is_95th: boolean;
   is_99th: boolean;
 };
-
-async function scorePortalRow(row: any) {
-  const payload = {
-    season_grade_level: String(row.season_grade_level ?? "").trim(),
-    school_classification: row.school_classification,
-    competition_level: String(row.competition_level ?? "").trim(),
-    games_played_pct: row.games_played_pct,
-    height_in: row.height_in,
-    weight_lb: row.weight_lb,
-  };
-
-  const r = await fetch(FASTAPI_SCORE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  if (!r.ok) return { p_eq6: null, expected_college_level: null };
-
-  const score = await r.json();
-  return {
-    p_eq6: score?.p_rungs?.eq6 ?? null,
-    expected_college_level: score?.expected_college_level ?? null,
-  };
-}
 
 export async function GET() {
   // ---------- HISTORICAL ----------
@@ -94,19 +61,13 @@ export async function GET() {
   });
 
   // ---------- PORTAL ----------
-  const { data: portal, error: portalErr } = await supabaseAdmin
+  const { data: portalProfiles, error: portalErr } = await supabaseAdmin
     .from("player_profiles")
     .select(
       `
       id,
       full_name,
-      position,
-      season_grade_level,
-      school_classification,
-      competition_level,
-      games_played_pct,
-      height_in,
-      weight_lb
+      position
     `
     );
 
@@ -117,43 +78,54 @@ export async function GET() {
     );
   }
 
-  const portalRows: LeaderboardRow[] = [];
+  const { data: portalScores, error: scoreErr } = await supabaseAdmin
+    .from("player_scores")
+    .select(
+      `
+      user_id,
+      p_eq6,
+      expected_college_level
+    `
+    );
 
-  for (const r of portal ?? []) {
-    // In production without a deployed FastAPI, we cannot score portal players.
-    // Keep them on the leaderboard, but with null scores.
-    let scored = { p_eq6: null as number | null, expected_college_level: null as number | null };
+  if (scoreErr) {
+    return NextResponse.json(
+      { error: `player_scores query failed: ${scoreErr.message}` },
+      { status: 500 }
+    );
+  }
 
-    if (FASTAPI_ENABLED) {
-      scored = await scorePortalRow(r);
-    }
+  const scoreMap = new Map<string, any>();
+  for (const s of portalScores ?? []) {
+    scoreMap.set(String(s.user_id), s);
+  }
 
-    const eq6 = scored.p_eq6 ?? null;
+  const portalRows: LeaderboardRow[] = (portalProfiles ?? []).map((r: any) => {
+    const savedScore = scoreMap.get(String(r.id));
+    const eq6 = savedScore?.p_eq6 ?? null;
 
-    portalRows.push({
+    return {
       source: "portal",
       player_key: String(r.id),
       display_name: r.full_name,
       position: r.position,
       season: 2022,
       p_eq6: eq6,
-      expected_college_level: scored.expected_college_level ?? null,
+      expected_college_level: savedScore?.expected_college_level ?? null,
 
       percentile: null,
       above_base_rate: (eq6 ?? -1) > FBS_BASE_RATE_EQ6,
       is_95th: (eq6 ?? -1) >= EQ6_P95,
       is_99th: (eq6 ?? -1) >= EQ6_P99,
-    });
-  }
+    };
+  });
 
-  // Sort with nulls at bottom
   const merged = [...portalRows, ...historicalRows].sort((a, b) => {
     const av = a.p_eq6 ?? -1;
     const bv = b.p_eq6 ?? -1;
     return bv - av;
   });
 
-  // Percentile rank (0..1). Null if p_eq6 is null.
   const total = merged.length;
   for (let i = 0; i < total; i++) {
     const row = merged[i];
@@ -167,6 +139,5 @@ export async function GET() {
   return NextResponse.json({
     count: merged.length,
     rows: merged,
-    fastapi_enabled: FASTAPI_ENABLED,
   });
 }

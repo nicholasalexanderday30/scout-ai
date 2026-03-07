@@ -148,6 +148,7 @@ export default function ProfileForm({ userId, onSignOut }: Props) {
     }
 
     const body = {
+      user_id: userId,
       season_grade_level: seasonGradeLevel,
       school_classification: Number(schoolClassification),
       competition_level: competitionLevel,
