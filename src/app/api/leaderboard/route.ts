@@ -65,7 +65,7 @@ export async function GET() {
     .from("player_profiles")
     .select(
       `
-      id,
+      user_id,
       full_name,
       position
     `
@@ -101,23 +101,23 @@ export async function GET() {
   }
 
   const portalRows: LeaderboardRow[] = (portalProfiles ?? []).map((r: any) => {
-    const savedScore = scoreMap.get(String(r.id));
+    const savedScore = scoreMap.get(String(r.user_id));
     const eq6 = savedScore?.p_eq6 ?? null;
 
     return {
       source: "portal",
-      player_key: String(r.id),
+      player_key: String(r.user_id),
       display_name: r.full_name,
-      position: r.position,
-      season: 2022,
+      position: r.position, 
+      season: 2022, 
       p_eq6: eq6,
-      expected_college_level: savedScore?.expected_college_level ?? null,
+      expected_college_level: savedScore?.expected_college_level ?? null, 
 
       percentile: null,
       above_base_rate: (eq6 ?? -1) > FBS_BASE_RATE_EQ6,
       is_95th: (eq6 ?? -1) >= EQ6_P95,
       is_99th: (eq6 ?? -1) >= EQ6_P99,
-    };
+    }; 
   });
 
   const merged = [...portalRows, ...historicalRows].sort((a, b) => {
@@ -128,7 +128,7 @@ export async function GET() {
 
   const total = merged.length;
   for (let i = 0; i < total; i++) {
-    const row = merged[i];
+    const row = merged[i]; 
     if (row.p_eq6 == null) {
       row.percentile = null;
       continue;
