@@ -7,7 +7,7 @@ const supabaseAdmin = createClient(
 );
 
 // GET /api/player?source=historical&key=...   (key = historical_cb_2022.player_key)
-// GET /api/player?source=portal&key=...       (key = player_profiles.id)
+// GET /api/player?source=portal&key=...       (key = player_profiles.user_id)
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
@@ -69,7 +69,7 @@ export async function GET(req: Request) {
   const { data: profile, error: profErr } = await supabaseAdmin
     .from("player_profiles")
     .select("*")
-    .eq("id", key)
+    .eq("user_id", key)
     .maybeSingle();
 
   if (profErr) {
@@ -85,7 +85,7 @@ export async function GET(req: Request) {
   const { data: metrics } = await supabaseAdmin
     .from("player_metrics")
     .select("*")
-    .eq("player_profile_id", key);
+    .eq("user_id", key);
 
   const { data: constraints } = await supabaseAdmin
     .from("opportunity_constraints")
@@ -94,7 +94,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     source: "portal",
-    player_key: profile.id,
+    player_key: profile.user_id,
     display_name: profile.full_name,
     position: profile.position,
     season: 2022,
