@@ -82,6 +82,19 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Player not found" }, { status: 404 });
   }
 
+  const { data: scoreRow, error: scoreErr } = await supabaseAdmin
+    .from("player_scores")
+    .select("*")
+    .eq("user_id", key)
+    .maybeSingle();
+
+  if (scoreErr) {
+    return NextResponse.json(
+      { error: `Portal score lookup failed: ${scoreErr.message}` },
+      { status: 500 }
+    );
+  }
+
   const { data: metrics } = await supabaseAdmin
     .from("player_metrics")
     .select("*")
@@ -90,7 +103,7 @@ export async function GET(req: Request) {
   const { data: constraints } = await supabaseAdmin
     .from("opportunity_constraints")
     .select("*")
-    .eq("player_profile_id", key);
+    .eq("user_id", key);
 
   return NextResponse.json({
     source: "portal",
@@ -98,6 +111,13 @@ export async function GET(req: Request) {
     display_name: profile.full_name,
     position: profile.position,
     season: 2022,
+    scores: {
+      p_eq6: scoreRow?.p_eq6 ?? null,
+      expected_college_level: scoreRow?.expected_college_level ?? null,
+      p_rungs: scoreRow?.p_rungs ?? null,
+      p_levels: scoreRow?.p_levels ?? null,
+      scored_at: scoreRow?.scored_at ?? null,
+    },
     profile,
     metrics: metrics ?? [],
     constraints: constraints ?? [],

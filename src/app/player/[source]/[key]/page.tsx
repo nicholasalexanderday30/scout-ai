@@ -26,6 +26,13 @@ type PlayerResponse =
       display_name: string;
       position: string;
       season: number;
+      scores: {
+        p_eq6: number | null;
+        expected_college_level: number | null;
+        p_rungs: Record<string, number> | null;
+        p_levels: Record<string, number> | null;
+        scored_at: string | null;
+      };
       profile: Record<string, any>;
       metrics: Record<string, any>[];
       constraints: Record<string, any>[];
@@ -153,8 +160,7 @@ export default function PlayerPage() {
 
   const eq6 = useMemo(() => {
     if (!data) return null;
-    if (data.source === "historical") return data.scores?.p_eq6 ?? null;
-    return null;
+    return data.scores?.p_eq6 ?? null;
   }, [data]);
 
   const eq6Class = classifyEq6(eq6);
@@ -183,15 +189,15 @@ export default function PlayerPage() {
           <div style={sub}>{subtitle}</div>
         </div>
 
-        {data?.source === "historical" && (
-          <div style={heroScore}>
+        {data && (
+  	  <div style={heroScore}>
             <div style={{ ...badge, ...(eq6Class === "high" ? badgeHigh : eq6Class === "mid" ? badgeMid : badgeLow) }}>
               EQ6
             </div>
             <div style={heroVal}>{fmtPct(eq6)}</div>
             <div style={heroHint}>FBS probability</div>
           </div>
-        )}
+	)}
       </div>
 
       {loading && <div style={noticeCard}>Loading…</div>}
@@ -200,75 +206,88 @@ export default function PlayerPage() {
       {!loading && !err && data && (
         <>
           {/* Score cards */}
-          {data.source === "historical" && (
             <div style={cardsRow}>
-              <div style={card}>
-                <div style={cardTitle}>Topline</div>
-                <div style={kvRow}>
-                  <div style={k}>EQ6 (FBS prob)</div>
-                  <div style={vStrong}>{fmtPct(data.scores?.p_eq6)}</div>
-                </div>
-                <div style={kvRow}>
-                  <div style={k}>Expected college level</div>
-                  <div style={v}>{fmtNum(data.scores?.expected_college_level)}</div>
-                </div>
-                <div style={kvRow}>
-                  <div style={k}>Scored at</div>
-                  <div style={v}>{data.scores?.scored_at ?? "—"}</div>
-                </div>
-              </div>
+  	      <div style={card}>
+    		<div style={cardTitle}>Topline</div>
+    		<div style={kvRow}>
+      		  <div style={k}>EQ6 (FBS prob)</div>
+      		  <div style={vStrong}>{fmtPct(data.scores?.p_eq6)}</div>
+    		</div>
+    		<div style={kvRow}>
+      		  <div style={k}>Expected college level</div>
+      	          <div style={v}>{fmtNum(data.scores?.expected_college_level)}</div>
+    		</div>
+    		<div style={kvRow}>
+      		  <div style={k}>Scored at</div>
+      		  <div style={v}>{data.scores?.scored_at ?? "—"}</div>
+    		</div>
+  	       </div>
 
-              <div style={card}>
-                <div style={cardTitle}>Ladder probabilities</div>
-                <div style={{ marginTop: 10 }}>
-                  {toEntries(data.scores?.p_rungs || {}).map(([kk, vv]) => {
-                    const pct = fmtPctNum(Number(vv));
-                    return (
-                      <div key={kk} style={barRow}>
-                        <div style={barLabel}>{kk.toUpperCase()}</div>
-                        <div style={barTrack}>
-                          <div
-                            style={{
-                              ...barFill,
-                              width: pct == null ? "0%" : `${Math.max(0, Math.min(100, pct))}%`,
-                            }}
-                          />
-                        </div>
-                        <div style={barVal}>{fmtPct(Number(vv))}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
+  	       <div style={card}>
+    		 <div style={cardTitle}>Ladder probabilities</div>
+    		 <div style={{ marginTop: 10 }}>
+      		   {toEntries(data.scores?.p_rungs || {}).map(([kk, vv]) => {
+        	     const pct = fmtPctNum(Number(vv));
+        	     return (
+          	       <div key={kk} style={barRow}>
+            		 <div style={barLabel}>{kk.toUpperCase()}</div>
+            		 <div style={barTrack}>
+              		   <div
+                	     style={{
+                  	       ...barFill,
+                  	       width: pct == null ? "0%" : `${Math.max(0, Math.min(100, pct))}%`,
+                	     }}
+              		    />
+            		  </div>
+            		  <div style={barVal}>{fmtPct(Number(vv))}</div>
+          		</div>
+        	      );
+      		    })}
+    		  </div>
+  		</div>
+	      </div>
 
           {/* Historical: grouped stats */}
-          {data.source === "historical" && histGroups && (
-            <>
-              <div style={sectionTitle}>Profile</div>
-              <div style={grid3}>
-                <div style={card}>
-                  <div style={cardTitle}>Physical</div>
-                  <StatGrid obj={histGroups.physical} />
-                </div>
-                <div style={card}>
-                  <div style={cardTitle}>Opportunity</div>
-                  <StatGrid obj={histGroups.opportunity} />
-                </div>
-                <div style={card}>
-                  <div style={cardTitle}>Outcome</div>
-                  <StatGrid obj={histGroups.outcome} />
-                </div>
-              </div>
+          <div style={cardsRow}>
+ 	   <div style={card}>
+    	    <div style={cardTitle}>Topline</div>
+   	     <div style={kvRow}>
+      <div style={k}>EQ6 (FBS prob)</div>
+      <div style={vStrong}>{fmtPct(data.scores?.p_eq6)}</div>
+    </div>
+    <div style={kvRow}>
+      <div style={k}>Expected college level</div>
+      <div style={v}>{fmtNum(data.scores?.expected_college_level)}</div>
+    </div>
+    <div style={kvRow}>
+      <div style={k}>Scored at</div>
+      <div style={v}>{data.scores?.scored_at ?? "—"}</div>
+    </div>
+  </div>
 
-              <div style={sectionTitle}>All stats</div>
-              <div style={card}>
-                <StatGrid obj={data.stats || {}} columns={3} />
-              </div>
-            </>
-          )}
-
+  <div style={card}>
+    <div style={cardTitle}>Ladder probabilities</div>
+    <div style={{ marginTop: 10 }}>
+      {toEntries(data.scores?.p_rungs || {}).map(([kk, vv]) => {
+        const pct = fmtPctNum(Number(vv));
+        return (
+          <div key={kk} style={barRow}>
+            <div style={barLabel}>{kk.toUpperCase()}</div>
+            <div style={barTrack}>
+              <div
+                style={{
+                  ...barFill,
+                  width: pct == null ? "0%" : `${Math.max(0, Math.min(100, pct))}%`,
+                }}
+              />
+            </div>
+            <div style={barVal}>{fmtPct(Number(vv))}</div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+</div>
           {/* Portal: keep clean, not raw dumps */}
           {data.source === "portal" && (
             <>
