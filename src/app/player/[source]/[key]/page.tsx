@@ -4,6 +4,20 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+type LeaderboardLookupRow = {
+  source: "historical" | "portal";
+  player_key: string;
+  percentile: number | null;
+  above_base_rate: boolean;
+  is_95th: boolean;
+  is_99th: boolean;
+};
+
+type LeaderboardLookupResponse = {
+  count: number;
+  rows: LeaderboardLookupRow[];
+};
+
 type PlayerResponse =
   | {
       source: "historical";
@@ -48,10 +62,20 @@ function fmtPctNum(x: number | null | undefined) {
   return x * 100;
 }
 
+function fmtPercentile(x: number | null | undefined) {
+  if (x == null || Number.isNaN(x)) return "—";
+  return `${(x * 100).toFixed(1)}th`;
+}
+
 function fmtNum(x: any) {
   if (x == null) return "—";
   if (typeof x === "number" && Number.isFinite(x)) return x.toString();
   return String(x);
+}
+
+function fmtLevel(x: number | null | undefined) {
+  if (x == null || Number.isNaN(x)) return "—";
+  return x.toFixed(2);
 }
 
 function toEntries(obj: Record<string, any>) {
@@ -72,7 +96,12 @@ function classifyEq6(p: number | null) {
 
 function groupHistoricalStats(stats: Record<string, any>) {
   const physKeys = new Set(["height_in", "weight_lb"]);
-  const oppKeys = new Set(["season_grade_level", "school_classification", "competition_level", "games_played_pct"]);
+  const oppKeys = new Set([
+    "season_grade_level",
+    "school_classification",
+    "competition_level",
+    "games_played_pct",
+  ]);
   const outKeys = new Set(["college_level", "FBS_Level"]);
 
   const physical: Record<string, any> = {};
@@ -90,6 +119,38 @@ function groupHistoricalStats(stats: Record<string, any>) {
   return { physical, opportunity, outcome, other };
 }
 
+function getBadgeMeta(row: {
+  is_99th: boolean;
+  is_95th: boolean;
+  above_base_rate: boolean;
+}) {
+  if (row.is_99th) {
+    return {
+      label: "Elite",
+      style: badgeElite,
+    };
+  }
+
+  if (row.is_95th) {
+    return {
+      label: "Top 5%",
+      style: badgeTop5,
+    };
+  }
+
+  if (row.above_base_rate) {
+    return {
+      label: "Above Base",
+      style: badgeAboveBase,
+    };
+  }
+
+  return {
+    label: "Below Base",
+    style: badgeBelowBase,
+  };
+}
+
 export default function PlayerPage() {
   const params = useParams<{ source?: string; key?: string }>();
   const source = normParam(params?.source).toLowerCase();
@@ -98,6 +159,7 @@ export default function PlayerPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [data, setData] = useState<PlayerResponse | null>(null);
+  const [lbMeta, setLbMeta] = useState<LeaderboardLookupRow | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +209,33 @@ export default function PlayerPage() {
     };
   }, [source, key]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      if (!source || !key) return;
+      if (source !== "historical" && source !== "portal") return;
+
+      const res = await fetch("/api/leaderboard");
+      if (!res.ok) return;
+
+      const json = (await res.json()) as LeaderboardLookupResponse;
+      const match =
+        json.rows?.find(
+          (r) => String(r.source) === source && String(r.player_key) === key
+        ) ?? null;
+
+      if (!cancelled) {
+        setLbMeta(match);
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [source, key]);
+
   const title = useMemo(() => {
     if (!data) return "Player";
     return data.display_name?.trim() || data.player_key;
@@ -170,11 +259,15 @@ export default function PlayerPage() {
     return groupHistoricalStats(data.stats || {});
   }, [data]);
 
+  const badgeMeta = useMemo(() => {
+    if (!lbMeta) return null;
+    return getBadgeMeta(lbMeta);
+  }, [lbMeta]);
+
   return (
     <div style={wrap}>
       <div style={bgGlow} />
 
-      {/* Top nav */}
       <div style={topbar}>
         <Link href="/leaderboard" style={backLink}>
           ← Leaderboard
@@ -182,7 +275,6 @@ export default function PlayerPage() {
         {data ? <div style={keyChip}>{data.player_key}</div> : null}
       </div>
 
-      {/* Header */}
       <div style={header}>
         <div>
           <div style={h1}>{title}</div>
@@ -190,14 +282,19 @@ export default function PlayerPage() {
         </div>
 
         {data && (
-  	  <div style={heroScore}>
-            <div style={{ ...badge, ...(eq6Class === "high" ? badgeHigh : eq6Class === "mid" ? badgeMid : badgeLow) }}>
+          <div style={heroScore}>
+            <div
+              style={{
+                ...badge,
+                ...(eq6Class === "high" ? badgeHigh : eq6Class === "mid" ? badgeMid : badgeLow),
+              }}
+            >
               EQ6
             </div>
             <div style={heroVal}>{fmtPct(eq6)}</div>
             <div style={heroHint}>FBS probability</div>
           </div>
-	)}
+        )}
       </div>
 
       {loading && <div style={noticeCard}>Loading…</div>}
@@ -206,104 +303,100 @@ export default function PlayerPage() {
       {!loading && !err && data && (
         <>
           {/* Score cards */}
-            <div style={cardsRow}>
-  	      <div style={card}>
-    		<div style={cardTitle}>Topline</div>
-    		<div style={kvRow}>
-      		  <div style={k}>EQ6 (FBS prob)</div>
-      		  <div style={vStrong}>{fmtPct(data.scores?.p_eq6)}</div>
-    		</div>
-    		<div style={kvRow}>
-      		  <div style={k}>Expected college level</div>
-      	          <div style={v}>{fmtNum(data.scores?.expected_college_level)}</div>
-    		</div>
-    		<div style={kvRow}>
-      		  <div style={k}>Scored at</div>
-      		  <div style={v}>{data.scores?.scored_at ?? "—"}</div>
-    		</div>
-  	       </div>
-
-  	       <div style={card}>
-    		 <div style={cardTitle}>Ladder probabilities</div>
-    		 <div style={{ marginTop: 10 }}>
-      		   {toEntries(data.scores?.p_rungs || {}).map(([kk, vv]) => {
-        	     const pct = fmtPctNum(Number(vv));
-        	     return (
-          	       <div key={kk} style={barRow}>
-            		 <div style={barLabel}>{kk.toUpperCase()}</div>
-            		 <div style={barTrack}>
-              		   <div
-                	     style={{
-                  	       ...barFill,
-                  	       width: pct == null ? "0%" : `${Math.max(0, Math.min(100, pct))}%`,
-                	     }}
-              		    />
-            		  </div>
-            		  <div style={barVal}>{fmtPct(Number(vv))}</div>
-          		</div>
-        	      );
-      		    })}
-    		  </div>
-  		</div>
-	      </div>
-
-          {/* Historical: grouped stats */}
           <div style={cardsRow}>
- 	   <div style={card}>
-    	    <div style={cardTitle}>Topline</div>
-   	     <div style={kvRow}>
-      <div style={k}>EQ6 (FBS prob)</div>
-      <div style={vStrong}>{fmtPct(data.scores?.p_eq6)}</div>
-    </div>
-    <div style={kvRow}>
-      <div style={k}>Expected college level</div>
-      <div style={v}>{fmtNum(data.scores?.expected_college_level)}</div>
-    </div>
-    <div style={kvRow}>
-      <div style={k}>Scored at</div>
-      <div style={v}>{data.scores?.scored_at ?? "—"}</div>
-    </div>
-  </div>
-
-  <div style={card}>
-    <div style={cardTitle}>Ladder probabilities</div>
-    <div style={{ marginTop: 10 }}>
-      {toEntries(data.scores?.p_rungs || {}).map(([kk, vv]) => {
-        const pct = fmtPctNum(Number(vv));
-        return (
-          <div key={kk} style={barRow}>
-            <div style={barLabel}>{kk.toUpperCase()}</div>
-            <div style={barTrack}>
-              <div
-                style={{
-                  ...barFill,
-                  width: pct == null ? "0%" : `${Math.max(0, Math.min(100, pct))}%`,
-                }}
-              />
+            <div style={card}>
+              <div style={cardTitle}>Topline</div>
+              <div style={kvRow}>
+                <div style={k}>EQ6 (FBS prob)</div>
+                <div style={vStrong}>{fmtPct(data.scores?.p_eq6)}</div>
+              </div>
+              <div style={kvRow}>
+                <div style={k}>Percentile</div>
+                <div style={v}>{fmtPercentile(lbMeta?.percentile)}</div>
+              </div>
+              <div style={kvRow}>
+                <div style={k}>Badge</div>
+                <div style={v}>
+                  {badgeMeta ? (
+                    <span style={{ ...pillBadge, ...badgeMeta.style }}>{badgeMeta.label}</span>
+                  ) : (
+                    "—"
+                  )}
+                </div>
+              </div>
+              <div style={kvRow}>
+                <div style={k}>Expected college level</div>
+                <div style={v}>{fmtLevel(data.scores?.expected_college_level)}</div>
+              </div>
+              <div style={kvRow}>
+                <div style={k}>Scored at</div>
+                <div style={v}>{data.scores?.scored_at ?? "—"}</div>
+              </div>
             </div>
-            <div style={barVal}>{fmtPct(Number(vv))}</div>
+
+            <div style={card}>
+              <div style={cardTitle}>Ladder probabilities</div>
+              <div style={{ marginTop: 10 }}>
+                {toEntries(data.scores?.p_rungs || {}).map(([kk, vv]) => {
+                  const pct = fmtPctNum(Number(vv));
+                  return (
+                    <div key={kk} style={barRow}>
+                      <div style={barLabel}>{kk.toUpperCase()}</div>
+                      <div style={barTrack}>
+                        <div
+                          style={{
+                            ...barFill,
+                            width: pct == null ? "0%" : `${Math.max(0, Math.min(100, pct))}%`,
+                          }}
+                        />
+                      </div>
+                      <div style={barVal}>{fmtPct(Number(vv))}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-        );
-      })}
-    </div>
-  </div>
-</div>
-          {/* Portal: keep clean, not raw dumps */}
+
+          {data.source === "historical" && histGroups && (
+            <>
+              <div style={sectionTitle}>Physical</div>
+              <div style={card}>
+                <StatGrid obj={histGroups.physical} columns={2} />
+              </div>
+
+              <div style={sectionTitle}>Opportunity</div>
+              <div style={card}>
+                <StatGrid obj={histGroups.opportunity} columns={2} />
+              </div>
+
+              <div style={sectionTitle}>Outcome</div>
+              <div style={card}>
+                <StatGrid obj={histGroups.outcome} columns={2} />
+              </div>
+
+              <div style={sectionTitle}>Other stats</div>
+              <div style={card}>
+                <StatGrid obj={histGroups.other} columns={3} />
+              </div>
+            </>
+          )}
+
           {data.source === "portal" && (
             <>
               <div style={sectionTitle}>Profile</div>
               <div style={card}>
-                <StatGrid obj={(data as any).profile || {}} columns={3} />
+                <StatGrid obj={data.profile || {}} columns={3} />
               </div>
 
               <div style={sectionTitle}>Metrics</div>
               <div style={card}>
-                <PrettyList rows={(data as any).metrics || []} emptyText="No metrics rows." />
+                <PrettyList rows={data.metrics || []} emptyText="No metrics rows." />
               </div>
 
               <div style={sectionTitle}>Opportunity constraints</div>
               <div style={card}>
-                <PrettyList rows={(data as any).constraints || []} emptyText="No constraints rows." />
+                <PrettyList rows={data.constraints || []} emptyText="No constraints rows." />
               </div>
             </>
           )}
@@ -445,6 +538,36 @@ const badgeHigh: React.CSSProperties = { background: "rgba(120,220,200,0.14)" };
 const badgeMid: React.CSSProperties = { background: "rgba(255,220,130,0.14)" };
 const badgeLow: React.CSSProperties = { background: "rgba(255,140,120,0.14)" };
 
+const badgeElite: React.CSSProperties = {
+  background: "rgba(255,80,80,0.18)",
+  borderColor: "rgba(255,80,80,0.45)",
+};
+
+const badgeTop5: React.CSSProperties = {
+  background: "rgba(120,180,255,0.18)",
+  borderColor: "rgba(120,180,255,0.45)",
+};
+
+const badgeAboveBase: React.CSSProperties = {
+  background: "rgba(120,255,170,0.14)",
+  borderColor: "rgba(120,255,170,0.38)",
+};
+
+const badgeBelowBase: React.CSSProperties = {
+  background: "rgba(255,255,255,0.06)",
+  borderColor: "rgba(255,255,255,0.16)",
+};
+
+const pillBadge: React.CSSProperties = {
+  display: "inline-block",
+  padding: "4px 10px",
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 700,
+  border: "1px solid rgba(255,255,255,0.14)",
+  whiteSpace: "nowrap",
+};
+
 const heroVal: React.CSSProperties = {
   fontSize: 28,
   fontWeight: 900,
@@ -526,8 +649,7 @@ const barTrack: React.CSSProperties = {
 const barFill: React.CSSProperties = {
   height: "100%",
   borderRadius: 999,
-  background:
-    "linear-gradient(90deg, rgba(90,140,255,0.75), rgba(120,220,200,0.75))",
+  background: "linear-gradient(90deg, rgba(90,140,255,0.75), rgba(120,220,200,0.75))",
 };
 
 const barVal: React.CSSProperties = {
@@ -543,12 +665,6 @@ const sectionTitle: React.CSSProperties = {
   opacity: 0.75,
   letterSpacing: 0.25,
   fontWeight: 700,
-};
-
-const grid3: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr 1fr",
-  gap: 14,
 };
 
 const gridItem: React.CSSProperties = {

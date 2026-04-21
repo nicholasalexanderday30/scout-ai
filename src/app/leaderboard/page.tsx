@@ -1,18 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
 
 type Row = {
   source: "portal" | "historical";
   player_key: string;
   display_name: string;
-  position?: string;
-  season?: number;
+  position: string | null;
+  season: number | null;
+
+  grad_year: number | null;
+  height_in: number | null;
+  weight_lb: number | null;
+  competition_level: string | null;
+  school_classification: string | null;
+  games_played_pct: number | null;
+
   p_eq6: number | null;
   expected_college_level: number | null;
 
-  percentile: number | null; // 0..1
+  percentile: number | null;
   above_base_rate: boolean;
   is_95th: boolean;
   is_99th: boolean;
@@ -22,11 +29,6 @@ type ApiResponse = {
   count: number;
   rows: Row[];
 };
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 function fmtPct(x: number | null) {
   if (x == null || Number.isNaN(x)) return "—";
@@ -38,10 +40,9 @@ function fmtPercentile(x: number | null) {
   return `${(x * 100).toFixed(1)}th`;
 }
 
-
 function fmtLevel(x: number | null) {
   if (x == null || Number.isNaN(x)) return "—";
-  return String(Math.round(x));
+  return x.toFixed(2);
 }
 
 function clamp(n: number, lo: number, hi: number) {
@@ -52,16 +53,54 @@ function sourceLabel(s: "portal" | "historical") {
   return s === "portal" ? "Portal" : "Historical";
 }
 
+function fmtInches(x: number | null) {
+  if (x == null || Number.isNaN(x)) return "—";
+  return String(x);
+}
+
+function fmtWeight(x: number | null) {
+  if (x == null || Number.isNaN(x)) return "—";
+  return String(x);
+}
+
+function normText(v: string | null | undefined) {
+  return String(v ?? "").trim().toLowerCase();
+}
+
 export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [data, setData] = useState<ApiResponse | null>(null);
 
-  // Filters
   const [q, setQ] = useState("");
   const [source, setSource] = useState<"all" | "portal" | "historical">("all");
-  const [minEq6Pct, setMinEq6Pct] = useState<number>(0); // 0..100
-  const [sort, setSort] = useState<"eq6_desc" | "name_asc">("eq6_desc");
+  const [position, setPosition] = useState("all");
+  const [gradYear, setGradYear] = useState("all");
+  const [competitionLevel, setCompetitionLevel] = useState("all");
+  const [schoolClassification, setSchoolClassification] = useState("all");
+
+  const [minHeight, setMinHeight] = useState("");
+  const [minWeight, setMinWeight] = useState("");
+  const [minGamesPlayedPct, setMinGamesPlayedPct] = useState("");
+  const [minEq6Pct, setMinEq6Pct] = useState<number>(0);
+  const [minExpectedLevel, setMinExpectedLevel] = useState("");
+
+  const [sort, setSort] = useState<"eq6_desc" | "name_asc" | "expected_desc">("eq6_desc");
+
+  function resetFilters() {
+    setQ("");
+    setSource("all");
+    setPosition("all");
+    setGradYear("all");
+    setCompetitionLevel("all");
+    setSchoolClassification("all");
+    setMinHeight("");
+    setMinWeight("");
+    setMinGamesPlayedPct("");
+    setMinEq6Pct(0);
+    setMinExpectedLevel("");
+    setSort("eq6_desc");
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -69,8 +108,6 @@ export default function LeaderboardPage() {
     async function run() {
       setLoading(true);
       setErr(null);
-
-   
 
       const res = await fetch("/api/leaderboard", { method: "GET" });
       if (!res.ok) {
@@ -97,25 +134,128 @@ export default function LeaderboardPage() {
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
 
+  const positionOptions = useMemo(() => {
+    return Array.from(
+      new Set(rows.map((r) => r.position).filter((v): v is string => !!v && v.trim().length > 0))
+    ).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
+  const gradYearOptions = useMemo(() => {
+    return Array.from(
+      new Set(rows.map((r) => r.grad_year).filter((v): v is number => v != null && Number.isFinite(v)))
+    ).sort((a, b) => a - b);
+  }, [rows]);
+
+  const competitionOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        rows
+          .map((r) => r.competition_level)
+          .filter((v): v is string => !!v && v.trim().length > 0)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
+  const classificationOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        rows
+          .map((r) => r.school_classification)
+          .filter((v): v is string => !!v && v.trim().length > 0)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
+  const hasActiveFilters = useMemo(() => {
+    return (
+      q.trim() !== "" ||
+      source !== "all" ||
+      position !== "all" ||
+      gradYear !== "all" ||
+      competitionLevel !== "all" ||
+      schoolClassification !== "all" ||
+      minHeight.trim() !== "" ||
+      minWeight.trim() !== "" ||
+      minGamesPlayedPct.trim() !== "" ||
+      minEq6Pct !== 0 ||
+      minExpectedLevel.trim() !== "" ||
+      sort !== "eq6_desc"
+    );
+  }, [
+    q,
+    source,
+    position,
+    gradYear,
+    competitionLevel,
+    schoolClassification,
+    minHeight,
+    minWeight,
+    minGamesPlayedPct,
+    minEq6Pct,
+    minExpectedLevel,
+    sort,
+  ]);
+
   const filteredRows = useMemo(() => {
     const qq = q.trim().toLowerCase();
+
     const minEq6 = clamp(minEq6Pct, 0, 100) / 100;
+    const minHeightNum = minHeight.trim() === "" ? null : Number(minHeight);
+    const minWeightNum = minWeight.trim() === "" ? null : Number(minWeight);
+    const minGamesNum = minGamesPlayedPct.trim() === "" ? null : Number(minGamesPlayedPct);
+    const minExpectedNum = minExpectedLevel.trim() === "" ? null : Number(minExpectedLevel);
 
     let out = rows;
 
     if (source !== "all") out = out.filter((r) => r.source === source);
-    out = out.filter((r) => (r.p_eq6 ?? -1) >= minEq6);
+    if (position !== "all") out = out.filter((r) => normText(r.position) === normText(position));
+    if (gradYear !== "all") out = out.filter((r) => String(r.grad_year ?? "") === gradYear);
+    if (competitionLevel !== "all") {
+      out = out.filter((r) => normText(r.competition_level) === normText(competitionLevel));
+    }
+    if (schoolClassification !== "all") {
+      out = out.filter((r) => normText(r.school_classification) === normText(schoolClassification));
+    }
+
+    if (minEq6 > 0) {
+      out = out.filter((r) => r.p_eq6 != null && r.p_eq6 >= minEq6);
+    }
+
+    if (minHeightNum != null && Number.isFinite(minHeightNum)) {
+      out = out.filter((r) => (r.height_in ?? -1) >= minHeightNum);
+    }
+
+    if (minWeightNum != null && Number.isFinite(minWeightNum)) {
+      out = out.filter((r) => (r.weight_lb ?? -1) >= minWeightNum);
+    }
+
+    if (minGamesNum != null && Number.isFinite(minGamesNum)) {
+      out = out.filter((r) => (r.games_played_pct ?? -1) >= minGamesNum / 100);
+    }
+
+    if (minExpectedNum != null && Number.isFinite(minExpectedNum)) {
+      out = out.filter((r) => (r.expected_college_level ?? -1) >= minExpectedNum);
+    }
 
     if (qq.length > 0) {
       out = out.filter((r) => {
         const name = (r.display_name ?? "").toLowerCase();
         const key = (r.player_key ?? "").toLowerCase();
-        return name.includes(qq) || key.includes(qq);
+        const pos = (r.position ?? "").toLowerCase();
+        return name.includes(qq) || key.includes(qq) || pos.includes(qq);
       });
     }
 
     if (sort === "eq6_desc") {
-      out = [...out].sort((a, b) => (b.p_eq6 ?? -1) - (a.p_eq6 ?? -1));
+      out = [...out].sort((a, b) => {
+        const av = a.p_eq6 ?? -1;
+        const bv = b.p_eq6 ?? -1;
+        return bv - av;
+      });
+    } else if (sort === "expected_desc") {
+      out = [...out].sort(
+        (a, b) => (b.expected_college_level ?? -1) - (a.expected_college_level ?? -1)
+      );
     } else {
       out = [...out].sort((a, b) =>
         (a.display_name ?? a.player_key).localeCompare(b.display_name ?? b.player_key)
@@ -123,14 +263,26 @@ export default function LeaderboardPage() {
     }
 
     return out;
-  }, [rows, q, source, minEq6Pct, sort]);
+  }, [
+    rows,
+    q,
+    source,
+    position,
+    gradYear,
+    competitionLevel,
+    schoolClassification,
+    minHeight,
+    minWeight,
+    minGamesPlayedPct,
+    minEq6Pct,
+    minExpectedLevel,
+    sort,
+  ]);
 
   return (
     <div style={wrap}>
-      {/* Background */}
       <div style={bgGlow} />
 
-      {/* Header */}
       <div style={header}>
         <div>
           <div style={h1}>Leaderboard</div>
@@ -152,14 +304,13 @@ export default function LeaderboardPage() {
         </div>
       </div>
 
-      {/* Filters */}
       <div style={filtersCard}>
-        <div>
+        <div style={filterSpan2}>
           <div style={label}>Search</div>
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Name or key…"
+            placeholder="Name, key, or position…"
             style={input}
           />
         </div>
@@ -174,6 +325,102 @@ export default function LeaderboardPage() {
         </div>
 
         <div>
+          <div style={label}>Position</div>
+          <select value={position} onChange={(e) => setPosition(e.target.value)} style={input}>
+            <option value="all">All</option>
+            {positionOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <div style={label}>Grad year</div>
+          <select value={gradYear} onChange={(e) => setGradYear(e.target.value)} style={input}>
+            <option value="all">All</option>
+            {gradYearOptions.map((opt) => (
+              <option key={opt} value={String(opt)}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <div style={label}>Competition level</div>
+          <select
+            value={competitionLevel}
+            onChange={(e) => setCompetitionLevel(e.target.value)}
+            style={input}
+          >
+            <option value="all">All</option>
+            {competitionOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <div style={label}>School classification</div>
+          <select
+            value={schoolClassification}
+            onChange={(e) => setSchoolClassification(e.target.value)}
+            style={input}
+          >
+            <option value="all">All</option>
+            {classificationOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <div style={label}>Min height (in)</div>
+          <input
+            value={minHeight}
+            onChange={(e) => setMinHeight(e.target.value)}
+            placeholder="e.g. 72"
+            style={input}
+          />
+        </div>
+
+        <div>
+          <div style={label}>Min weight (lb)</div>
+          <input
+            value={minWeight}
+            onChange={(e) => setMinWeight(e.target.value)}
+            placeholder="e.g. 185"
+            style={input}
+          />
+        </div>
+
+        <div>
+          <div style={label}>Min games played %</div>
+          <input
+            value={minGamesPlayedPct}
+            onChange={(e) => setMinGamesPlayedPct(e.target.value)}
+            placeholder="e.g. 70"
+            style={input}
+          />
+        </div>
+
+        <div>
+          <div style={label}>Min expected level</div>
+          <input
+            value={minExpectedLevel}
+            onChange={(e) => setMinExpectedLevel(e.target.value)}
+            placeholder="e.g. 3"
+            style={input}
+          />
+        </div>
+
+        <div style={filterSpan2}>
           <div style={label}>Min EQ6</div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input
@@ -193,8 +440,19 @@ export default function LeaderboardPage() {
           <div style={label}>Sort</div>
           <select value={sort} onChange={(e) => setSort(e.target.value as any)} style={input}>
             <option value="eq6_desc">EQ6 ↓</option>
+            <option value="expected_desc">Expected ↓</option>
             <option value="name_asc">Name A→Z</option>
           </select>
+        </div>
+
+        <div style={filterActions}>
+          <div style={hasActiveFilters ? activeFiltersPill : inactiveFiltersPill}>
+            {hasActiveFilters ? "Filters active" : "No active filters"}
+          </div>
+
+          <button onClick={resetFilters} style={resetBtn}>
+            Reset Filters
+          </button>
         </div>
       </div>
 
@@ -211,11 +469,15 @@ export default function LeaderboardPage() {
                   <th style={th}>Name</th>
                   <th style={{ ...th, width: 120 }}>Source</th>
                   <th style={{ ...th, width: 80 }}>Pos</th>
-                  <th style={{ ...th, width: 90 }}>Season</th>
-		  <th style={{ ...th, textAlign: "right", width: 120 }}>EQ6</th>
-                  <th style={{ ...th, textAlign: "right", width: 120 }}>Percentile</th>
-                  <th style={{ ...th, textAlign: "right", width: 140 }}>Expected</th>
-
+                  <th style={{ ...th, width: 90 }}>Grad</th>
+                  <th style={{ ...th, width: 90 }}>Ht</th>
+                  <th style={{ ...th, width: 90 }}>Wt</th>
+                  <th style={{ ...th, width: 130 }}>Comp</th>
+                  <th style={{ ...th, width: 130 }}>Class</th>
+                  <th style={{ ...th, width: 110, textAlign: "right" }}>Games %</th>
+                  <th style={{ ...th, width: 140, textAlign: "right" }}>EQ6</th>
+                  <th style={{ ...th, width: 120, textAlign: "right" }}>Percentile</th>
+                  <th style={{ ...th, width: 120, textAlign: "right" }}>Expected</th>
                 </tr>
               </thead>
 
@@ -230,8 +492,7 @@ export default function LeaderboardPage() {
                         ...(top ? trTop : null),
                       }}
                       onMouseEnter={(e) => {
-                        (e.currentTarget as any).style.background =
-                          "rgba(255,255,255,0.04)";
+                        (e.currentTarget as any).style.background = "rgba(255,255,255,0.04)";
                       }}
                       onMouseLeave={(e) => {
                         (e.currentTarget as any).style.background = top
@@ -239,9 +500,7 @@ export default function LeaderboardPage() {
                           : "rgba(255,255,255,0.00)";
                       }}
                     >
-                      <td style={{ ...td, fontWeight: 800, opacity: 0.9 }}>
-                        #{i + 1}
-                      </td>
+                      <td style={{ ...td, fontWeight: 800, opacity: 0.9 }}>#{i + 1}</td>
 
                       <td style={tdName}>
                         <a
@@ -266,46 +525,78 @@ export default function LeaderboardPage() {
                       </td>
 
                       <td style={td}>{r.position ?? "—"}</td>
-                      <td style={{ ...td, opacity: 0.75 }}>{r.season ?? "—"}</td>
-		      <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-  		        <div style={{ display: "inline-flex", gap: 8, alignItems: "center", justifyContent: "flex-end" }}>
-                         <span>{fmtPct(r.p_eq6)}</span>
+                      <td style={td}>{r.grad_year ?? "—"}</td>
+                      <td style={td}>{fmtInches(r.height_in)}</td>
+                      <td style={td}>{fmtWeight(r.weight_lb)}</td>
+                      <td style={td}>{r.competition_level ?? "—"}</td>
+                      <td style={td}>{r.school_classification ?? "—"}</td>
+                      <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                        {fmtPct(r.games_played_pct)}
+                      </td>
 
-    			 {r.is_99th && (
-      			   <span style={{ ...pill, background: "rgba(255,80,80,0.18)", borderColor: "rgba(255,80,80,0.45)" }}>
-        		     Elite
-      			   </span>
-    			 )}
+                      <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                        <div
+                          style={{
+                            display: "inline-flex",
+                            gap: 8,
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                          }}
+                        >
+                          <span>{fmtPct(r.p_eq6)}</span>
 
-    			 {!r.is_99th && r.is_95th && (
-      			   <span style={{ ...pill, background: "rgba(120,180,255,0.18)", borderColor: "rgba(120,180,255,0.45)" }}>
-        		     Top 5%
-      			   </span>
-    			)}
+                          {r.is_99th && (
+                            <span
+                              style={{
+                                ...pill,
+                                background: "rgba(255,80,80,0.18)",
+                                borderColor: "rgba(255,80,80,0.45)",
+                              }}
+                            >
+                              Elite
+                            </span>
+                          )}
 
-    			{!r.is_95th && r.above_base_rate && (
-      			  <span style={{ ...pill, background: "rgba(120,255,170,0.14)", borderColor: "rgba(120,255,170,0.38)" }}>
-        		    Above Base
-      			 </span>
-    			)}
-  		     </div>
-		   </td>
-                      
+                          {!r.is_99th && r.is_95th && (
+                            <span
+                              style={{
+                                ...pill,
+                                background: "rgba(120,180,255,0.18)",
+                                borderColor: "rgba(120,180,255,0.45)",
+                              }}
+                            >
+                              Top 5%
+                            </span>
+                          )}
 
-		     <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-  		       {fmtPercentile(r.percentile)}
-		     </td>
+                          {!r.is_95th && r.above_base_rate && (
+                            <span
+                              style={{
+                                ...pill,
+                                background: "rgba(120,255,170,0.14)",
+                                borderColor: "rgba(120,255,170,0.38)",
+                              }}
+                            >
+                              Above Base
+                            </span>
+                          )}
+                        </div>
+                      </td>
 
-	   	    <td style={{ ...td, textAlign: "right", opacity: 0.85 }}>
-  		      {fmtLevel(r.expected_college_level)}
-		    </td>
+                      <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                        {fmtPercentile(r.percentile)}
+                      </td>
+
+                      <td style={{ ...td, textAlign: "right", opacity: 0.85 }}>
+                        {fmtLevel(r.expected_college_level)}
+                      </td>
                     </tr>
                   );
                 })}
 
                 {filteredRows.length === 0 && (
                   <tr>
-                    <td style={{ padding: 14, opacity: 0.7 }} colSpan={7}>
+                    <td style={{ padding: 14, opacity: 0.7 }} colSpan={13}>
                       No results match your filters.
                     </td>
                   </tr>
@@ -314,9 +605,7 @@ export default function LeaderboardPage() {
             </table>
           </div>
 
-          <div style={tableFooter}>
-            Tip: Click a name to open the full player card.
-          </div>
+          <div style={tableFooter}>Tip: Click a name to open the full player card.</div>
         </div>
       )}
     </div>
@@ -326,7 +615,7 @@ export default function LeaderboardPage() {
 /* -------------------- styles -------------------- */
 
 const wrap: React.CSSProperties = {
-  maxWidth: 1100,
+  maxWidth: 1400,
   margin: "0 auto",
   padding: 24,
   position: "relative",
@@ -398,8 +687,52 @@ const filtersCard: React.CSSProperties = {
   background: "rgba(255,255,255,0.03)",
   backdropFilter: "blur(12px)",
   display: "grid",
-  gridTemplateColumns: "1.2fr 0.6fr 1fr 0.7fr",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
   gap: 12,
+};
+
+const filterSpan2: React.CSSProperties = {
+  gridColumn: "span 2",
+};
+
+const filterActions: React.CSSProperties = {
+  gridColumn: "span 4",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  marginTop: 4,
+};
+
+const activeFiltersPill: React.CSSProperties = {
+  display: "inline-block",
+  padding: "8px 12px",
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 700,
+  border: "1px solid rgba(120,255,170,0.38)",
+  background: "rgba(120,255,170,0.14)",
+};
+
+const inactiveFiltersPill: React.CSSProperties = {
+  display: "inline-block",
+  padding: "8px 12px",
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 700,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.04)",
+  opacity: 0.8,
+};
+
+const resetBtn: React.CSSProperties = {
+  padding: "10px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.04)",
+  color: "inherit",
+  cursor: "pointer",
+  fontWeight: 700,
 };
 
 const label: React.CSSProperties = {
@@ -464,7 +797,7 @@ const td: React.CSSProperties = {
 const tdName: React.CSSProperties = {
   ...td,
   fontWeight: 700,
-  maxWidth: 360,
+  maxWidth: 320,
   overflow: "hidden",
   textOverflow: "ellipsis",
 };
